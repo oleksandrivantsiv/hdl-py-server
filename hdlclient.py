@@ -74,8 +74,8 @@ class HDLComponent(object):
         return binascii.unhexlify(self.preamble + self.bytes_to_hex(b))
 
     def _send_packet(self, raw_data):
-        pack = Ether(src="74:2f:68:c7:ca:c8", dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.88.245", dst="192.168.88.255")/UDP(sport=6000, dport=6000)/Raw(raw_data)
-        sendp(pack, iface="wlan0", count=1)
+        pack = Ether(src="cc:2f:71:91:2e:54", dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.88.183", dst="192.168.88.255")/UDP(sport=6000, dport=6000)/Raw(raw_data)
+        sendp(pack, iface="wlp2s0", count=1)
 
     def validate_op(self, op):
         raise NotImplemented()
@@ -112,6 +112,83 @@ class HDLRelay(HDLComponent):
 
     def execute_op(self, op):
         self.cnt[1] = self.operations[op]
+        self._send_packet(self.raw_data())
+
+class HDLFloorHeating(HDLComponent):
+    """
+    Data Format:
+      Status: 1 byte
+      Temp: 1 byte
+      Mode: 1 byte
+      Normal temp: 1 byte
+      Day temp: 1 byte
+      Night temp: 1 byte
+      Away temp: 1 byte
+    """
+
+    status_map = {
+        "on":  1,
+        "off": 0
+    }
+
+    temperature_map = {
+        "cels": 0,
+        "fahr": 1
+    }
+
+    mode_map = {
+        "normal": 1,
+        "day": 2,
+        "night": 3,
+        "away": 4,
+        "timer": 5,
+    }
+
+    
+
+    def __init__(self, subnet_id, device_id, channel):
+        super(HDLFloorHeating, self).__init__()
+
+        self.oper_code = 0x1c5c
+        self.target_subnet_id = subnet_id
+        self.target_device_id = device_id
+        
+        self.temp_type = self.temperature_map["cels"]
+        self.status = self.status_map["on"]
+        self.mode = self.mode_map["normal"]
+        self.normal_temp = 23
+        self.day_temp = 23
+        self.night_temp = 20
+        self.away_temp = 20
+
+        self.cnt = []
+        self.cnt.append(channel & 0xff)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.cnt.append(0)
+        # Padding
+        self.cnt.append(0)
+        self.cnt.append(0)
+        self.length += len(self.cnt)
+
+    def content(self):
+        return self.cnt
+
+    def validate_op(self, op):
+        return op in self.operations
+
+    def execute_op(self, status, mode, normal_temp=None, day_temp=None, night_temp=None, away_temp=None):
+        self.cnt[1] = self.status_map[status]
+        self.cnt[2] = self.temp_type
+        self.cnt[3] = self.mode_map[mode]
+        self.cnt[4] = normal_temp if normal_temp else self.normal_temp
+        self.cnt[5] = day_temp if day_temp else self.day_temp
+        self.cnt[6] = night_temp if night_temp else self.night_temp
+        self.cnt[7] = away_temp if away_temp else self.away_temp
         self._send_packet(self.raw_data())
 
 
@@ -166,6 +243,23 @@ lights = AttrDict({
 
     "toilet": HDLRelay(0, 0, 0),  # TBD
     "toilet_vent": HDLRelay(0, 0, 0)  # TBD
+})
+
+
+floor_heatings = AttrDict({
+    "cabinet_fh": HDLFloorHeating(1, 31, 1), 
+    "living_room_fh": HDLFloorHeating(1, 31, 2), 
+    "hall_fh": HDLFloorHeating(1, 31, 3), 
+    "bath_room_fh": HDLFloorHeating(1, 31, 4), 
+    "bath_room_rad": HDLFloorHeating(1, 31, 5), 
+    "vault_rad": HDLFloorHeating(1, 31, 6), 
+
+    "cabinet_rad": HDLFloorHeating(1, 32, 1), 
+    "living_room_rad": HDLFloorHeating(1, 32, 2), 
+    #"living_room_vent": HDLFloorHeating(1, 32, 3), 
+    "bad_room_rad": HDLFloorHeating(1, 32, 4), 
+    "bad_room_vent": HDLFloorHeating(1, 32, 5), 
+    "child_rad": HDLFloorHeating(1, 32, 6), 
 })
 
 
