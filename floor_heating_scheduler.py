@@ -3,52 +3,63 @@
 import time
 import argparse
 from hdlclient import floor_heatings
-
-def parse_cmd_arguments():
-
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument("-m", "--mode", type=str, help="Mode that should be set")
-    arguments = arg_parser.parse_args()
-
-    return arguments
+import time
 
 
-def set_mode(mode):
-    off_devices = [
-        floor_heatings.cabinet_fh,
-        floor_heatings.living_room_fh,
-        floor_heatings.cabinet_rad,
-        floor_heatings.living_room_rad,
-    ]
+workdays = ["mon", "tue", "wed", "thu", "fri"]
+weekends = ["sat", "sun"]
 
-    normal_devices = [
-        floor_heatings.hall_fh,
-        floor_heatings.bad_room_rad,
-        floor_heatings.bad_room_vent,
-        floor_heatings.child_rad,
-    ]
 
-    for dev in off_devices:
-        dev.execute_op("off", mode, 6, 6, 6, 6)
+off_devices = [
+    floor_heatings.cabinet_fh,
+    floor_heatings.cabinet_rad,
+    floor_heatings.living_room_rad,
+]
 
-    for dev in normal_devices:
-        dev.execute_op("on", mode, 23, 23, 20, 20)
 
-    floor_heatings.bath_room_fh.execute_op("on", mode, 35, 35, 35, 35)
-    floor_heatings.bath_room_rad.execute_op("on", mode, 35, 35, 35, 35)
-    floor_heatings.vault_rad.execute_op("on", mode, 20, 20, 18, 18)
+def main(*arg, **kwargs):
+    day, month, date, time_now, year = time.ctime().lower().split()
+    hour = int(time_now.split(":")[0])
+
+    at_home_hours = []
+    away_hours = []
+    if day in workdays:
+        at_home_hours.append(6)
+        at_home_hours.append(18)
+        away_hours.append(9)
+        away_hours.append(0)
+    else:
+        at_home_hours.append(6)
+        away_hours.append(0)
+
+    mode = None
+    if hour in at_home_hours:
+        mode = "normal"
+    elif hour in away_hours:
+        mode = "away"
+
+    if mode:
+        floor_heatings.vault_rad.execute_op("on", mode, 20, 20, 18, 18)
+    
+        floor_heatings.hall_fh.execute_op("on", mode, 23, 23, 18, 18)
+        floor_heatings.living_room_fh.execute_op("on", mode, 23, 23, 18, 18)
+    
+        floor_heatings.bad_room_rad.execute_op("on", mode, 22, 22, 22, 22)
+        floor_heatings.bad_room_vent.execute_op("on", mode, 22, 22, 22, 22)
+        floor_heatings.child_rad.execute_op("on", mode, 22, 22, 22, 22)
+    
+        floor_heatings.bath_room_fh.execute_op("on", mode, 35, 35, 35, 35)
+        floor_heatings.bath_room_rad.execute_op("on", mode, 35, 35, 35, 35)
+
+    if hour == 1:
+       for dev in off_devices:
+           dev.execute_op("off", "normal", 6, 6, 6, 6)
+
+    if hour == 22:
+        # Turn off bad room radiator before go to sleep
+        floor_heatings.bad_room_vent.execute_op("off", "away", 22, 22, 22, 22)
 
 
 if __name__ == '__main__':
-    args = parse_cmd_arguments()
-
-    if args.mode == "at-home":
-        for i in xrange(3):
-    	    set_mode("normal")
-            time.sleep(1)
-    elif args.mode == "away":
-        for i in xrange(3):
-    	    set_mode("away")
-            time.sleep(1)
-    else:
-        raise RuntimeError("Wrong mode: %s" % mode)
+    for i in range(3):
+        main()
