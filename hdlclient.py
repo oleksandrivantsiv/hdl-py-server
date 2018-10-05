@@ -256,7 +256,7 @@ floor_heatings = AttrDict({
 
     "cabinet_rad": HDLFloorHeating(1, 32, 1), 
     "living_room_rad": HDLFloorHeating(1, 32, 2), 
-    #"living_room_vent": HDLFloorHeating(1, 32, 3), 
+    "living_room_vent": HDLFloorHeating(1, 32, 3), 
     "bad_room_rad": HDLFloorHeating(1, 32, 4), 
     "bad_room_vent": HDLFloorHeating(1, 32, 5), 
     "child_rad": HDLFloorHeating(1, 32, 6), 
