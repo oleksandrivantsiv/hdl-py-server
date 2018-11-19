@@ -75,7 +75,7 @@ class HDLComponent(object):
 
     def _send_packet(self, raw_data):
         pack = Ether(src="cc:2f:71:91:2e:54", dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.88.183", dst="192.168.88.255")/UDP(sport=6000, dport=6000)/Raw(raw_data)
-        sendp(pack, iface="wlp2s0", count=1)
+        sendp(pack, iface="eth0", count=1)
 
     def validate_op(self, op):
         raise NotImplemented()
