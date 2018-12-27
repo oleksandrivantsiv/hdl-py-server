@@ -1,87 +1,124 @@
 #!/usr/bin/python
 
 import crc16
+import time
 import binascii
+import codecs
+import threading
 from scapy.all import *
 
 
 class HDLComponent(object):
 
-    preamble = "c0a8011448444c4d495241434c45"
+    preamble = b"c0a8011448444c4d495241434c45"
 
     def __init__(self):
+        self.iface = "wlp2s0"
+        self.ip_address = None
+        self.udp_port = 6000
         # 16 bit
         self.leading_code = 0xaaaa
         # 8 bit (13-128)
         # Base data length without content
-        self.length = 11
+        self.header_length = 11
         # 8 bit (0-254)
         self.orig_subnet_id = 0xfc
         # 8 bit (0-254)
         self.orig_device_id = 0xfc
         # 16 bit (0-0xffff)
         self.orig_device_type = 0xfffc
-        # 16 bit (0-0xffff)
-        self.oper_code = 0
         # 8 bit (0-254)
         self.target_subnet_id = 0
         # 8 bit (0-254)
         self.target_device_id = 0
+        
+        self.sniffer = None
 
     def content(self):
         raise NotImplemented()
 
     def bytes_to_hex(self, b):
-        return "".join(map(lambda val: "%02x" % val, b))
+        return binascii.hexlify(bytes(b))
 
-    def crc(self):
-        b = self.bytes()
-        # CRC is cal
-        s = self.bytes_to_hex(b[2:])
-        print("crc", s)
-        print("crc", crc16.crc16xmodem(s.decode("hex")), hex(crc16.crc16xmodem(s.decode("hex"))))
-        return crc16.crc16xmodem(s.decode("hex"))
-
-    def bytes(self):
+    def raw_data(self, oper_code, content):
         b = []
-        content = self.content()
 
         b.append((self.leading_code >> 8) & 0xff)
         b.append(self.leading_code & 0xff)
-        b.append(self.length & 0xff)
+        b.append((self.header_length + len(content)) & 0xff)
         b.append(self.orig_subnet_id & 0xff)
         b.append(self.orig_device_id & 0xff)
         b.append((self.orig_device_type >> 8) & 0xff)
         b.append(self.orig_device_type & 0xff)
-        b.append((self.oper_code >> 8) & 0xff)
-        b.append(self.oper_code & 0xff)
+        b.append((oper_code >> 8) & 0xff)
+        b.append(oper_code & 0xff)
         b.append(self.target_subnet_id & 0xff)
         b.append(self.target_device_id & 0xff)
 
         b += content
 
-        return b
-
-    def raw_data(self):
-        b = self.bytes()
-        crc = self.crc()
+        s = self.bytes_to_hex(b[2:])
+        
+        crc = crc16.crc16xmodem(codecs.decode(s, 'hex'))
 
         b.append((crc >> 8) & 0xff)
         b.append(crc & 0xff)
 
-        print("new ", self.preamble + self.bytes_to_hex(b))
-
         return binascii.unhexlify(self.preamble + self.bytes_to_hex(b))
 
-    def _send_packet(self, raw_data):
-        pack = Ether(src="cc:2f:71:91:2e:54", dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.88.183", dst="192.168.88.255")/UDP(sport=6000, dport=6000)/Raw(raw_data)
-        sendp(pack, iface="eth0", count=1)
+    def set_ip_address(self, ip):
+        self.ip_address = ip
+    
+    def set_udp_port(self, port):
+        self.udp_port = int(port)
+
+    def send_packet(self, oper_code, content):
+        raw_data = self.raw_data(oper_code, content)
+        pack = Ether(src="cc:2f:71:91:2e:54", dst="ff:ff:ff:ff:ff:ff")/IP(src="192.168.88.183", dst=self.ip_address)/UDP(sport=self.udp_port, dport=self.udp_port)/Raw(raw_data)
+        sendp(pack, iface=self.iface, count=1, verbose=False)
+    
+    def run_sniffer(self):
+        stop_event = threading.Event()
+        
+        start = time.time()
+        
+        def recv(*args, **kwargs):
+            if time.time() - start > 1:
+                stop_event.set()
+
+            if self.receive(*args, **kwargs):
+                stop_event.set()
+
+        sniff(prn=recv, iface=self.iface, 
+              stop_filter=lambda p: stop_event.is_set(), 
+              filter="udp and port {}".format(self.udp_port), 
+              timeout=1)
+
+    def send_receive(self, oper_code, content):
+        self.sniffer = threading.Thread(target=self.run_sniffer)
+        self.sniffer.start()
+        time.sleep(0.1)
+        self.send_packet(oper_code, content)
 
     def validate_op(self, op):
         raise NotImplemented()
 
     def execute_op(self, op):
         raise NotImplemented()
+    
+    def update(self):
+        raise NotImplemented()
+    
+    def receive(self, packet):
+        raise NotImplemented()
+    
+    def get_status(self):
+        raise NotImplemented()
+    
+    def wait(self):
+        if self.sniffer:
+            self.sniffer.join()
+        self.sniffer = None
 
 
 class HDLRelay(HDLComponent):
@@ -94,15 +131,13 @@ class HDLRelay(HDLComponent):
     def __init__(self, subnet_id, device_id, channel):
         super(HDLRelay, self).__init__()
 
+        # 16 bit (0-0xffff)
         self.oper_code = 0x0031
+        self.update_oper_code = 0x0033
         self.target_subnet_id = subnet_id
         self.target_device_id = device_id
-        self.cnt = []
-        self.cnt.append(channel & 0xff)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.length += len(self.cnt)
+        self.channel = channel & 0xff
+        self.status = "off"
 
     def content(self):
         return self.cnt
@@ -111,8 +146,56 @@ class HDLRelay(HDLComponent):
         return op in self.operations
 
     def execute_op(self, op):
-        self.cnt[1] = self.operations[op]
-        self._send_packet(self.raw_data())
+        cnt = []
+        cnt.append(self.channel)
+        cnt.append(self.operations[op])
+        # Padding
+        cnt.append(0)
+        cnt.append(0)
+
+        self.send_packet(self.oper_code, cnt)
+        self.status = op
+
+    def receive(self, packet):
+        payload = bytes(packet[UDP].payload)
+        b = binascii.hexlify(payload)
+        data = b[len(self.preamble):]
+        
+        hdl_data = list(binascii.unhexlify(data))
+        
+        if hdl_data[3] != self.target_subnet_id:
+            return False
+        if hdl_data[4] != self.target_device_id:
+            return False
+        if hdl_data[7] != 0:
+            return False
+        if hdl_data[8] != 0x34:
+            return False
+
+        content = hdl_data[self.header_length:]
+        if content[0] != 0x0c:
+            return False
+        
+        channels = content[1:]
+        
+        c = channels[self.channel - 1]
+        for command, code in self.operations.items():
+            if c == code:
+                self.status = command
+                break
+
+        return True
+    
+    def get_status(self):
+        return {
+            "status": self.status,
+            }
+
+    def update(self):
+        if not self.target_subnet_id and not self.target_device_id and not self.channel:
+            return
+        
+        self.send_receive(self.update_oper_code, [])
 
 class HDLFloorHeating(HDLComponent):
     """
@@ -144,36 +227,24 @@ class HDLFloorHeating(HDLComponent):
         "timer": 5,
     }
 
-    
-
     def __init__(self, subnet_id, device_id, channel):
         super(HDLFloorHeating, self).__init__()
 
+        # 16 bit (0-0xffff)
         self.oper_code = 0x1c5c
+        self.update_oper_code = 0x1c5e
         self.target_subnet_id = subnet_id
         self.target_device_id = device_id
+        self.channel = channel & 0xff
         
-        self.temp_type = self.temperature_map["cels"]
-        self.status = self.status_map["on"]
-        self.mode = self.mode_map["normal"]
+        self.temp_type = "cels"
+        self.status = "on"
+        self.mode = "normal"
         self.normal_temp = 23
         self.day_temp = 23
         self.night_temp = 20
         self.away_temp = 20
-
-        self.cnt = []
-        self.cnt.append(channel & 0xff)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.cnt.append(0)
-        # Padding
-        self.cnt.append(0)
-        self.cnt.append(0)
-        self.length += len(self.cnt)
+        self.current_temp = 0
 
     def content(self):
         return self.cnt
@@ -182,14 +253,93 @@ class HDLFloorHeating(HDLComponent):
         return op in self.operations
 
     def execute_op(self, status, mode, normal_temp=None, day_temp=None, night_temp=None, away_temp=None):
-        self.cnt[1] = self.status_map[status]
-        self.cnt[2] = self.temp_type
-        self.cnt[3] = self.mode_map[mode]
-        self.cnt[4] = normal_temp if normal_temp else self.normal_temp
-        self.cnt[5] = day_temp if day_temp else self.day_temp
-        self.cnt[6] = night_temp if night_temp else self.night_temp
-        self.cnt[7] = away_temp if away_temp else self.away_temp
-        self._send_packet(self.raw_data())
+        self.status = status
+        self.mode = mode
+        self.normal_temp = normal_temp
+        self.day_temp = day_temp
+        self.night_temp = night_temp
+        self.away_temp = away_temp
+        
+        cnt = []
+        cnt.append(self.channel)
+        cnt.append(self.status_map[status])
+        cnt.append(self.temperature_map[self.temp_type])
+        cnt.append(self.mode_map[mode])
+        cnt.append(self.normal_temp)
+        cnt.append(self.day_temp)
+        cnt.append(self.night_temp)
+        cnt.append(self.away_temp)
+        # Padding
+        cnt.append(0)
+        cnt.append(0)
+        
+        print(cnt)
+
+        self.send_packet(self.oper_code, cnt)
+
+    def receive(self, packet):
+        payload = bytes(packet[UDP].payload)
+        b = binascii.hexlify(payload)
+        data = b[len(self.preamble):]
+        
+        hdl_data = list(binascii.unhexlify(data))
+        
+        if hdl_data[3] != self.target_subnet_id:
+            return False
+        if hdl_data[4] != self.target_device_id:
+            return False
+        if hdl_data[7] != 0x1c:
+            return False
+        if hdl_data[8] != 0x5f:
+            return False
+
+        content = hdl_data[self.header_length:]
+        
+        # Check channel number,
+        if content[0] != self.channel:
+            return False
+        
+        for status, code in self.status_map.items():
+            if content[1] & 0x7 == code:
+                self.status = status
+                break
+        
+        for temp_type, code in self.temperature_map.items():
+            if content[2] == code:
+                self.temp_type = temp_type
+                break
+        
+        for mode, code in self.mode_map.items():
+            if content[3] == code:
+                self.mode = mode
+                break
+        
+        self.normal_temp = content[4]
+        self.day_temp = content[5]
+        self.night_temp = content[6]
+        self.away_temp = content[7]
+        
+        self.current_temp = content[9]
+
+        return True
+
+    def update(self):
+        cnt = []
+        cnt.append(self.channel)
+
+        self.send_receive(self.update_oper_code, cnt)
+    
+    def get_status(self):
+        return {
+            "status": self.status,
+            "temp_type": self.temp_type,
+            "mode": self.mode,
+            "normal_temp": self.normal_temp,
+            "day_temp": self.day_temp,
+            "night_temp": self.night_temp,
+            "away_temp": self.away_temp,
+            "current_temp": self.current_temp
+            }
 
 
 # Zone: list of channels
@@ -289,9 +439,7 @@ scenarios_map = {
 class HDLClient(object):
 
     def process_ifttt(self, request_path):
-        print request_path
         request = request_path.split("/")
-        print("request lenght", len(request))
         if len(request) not in (4, 5):
             raise RuntimeError("Wrong request %s!" % request_path)
 
