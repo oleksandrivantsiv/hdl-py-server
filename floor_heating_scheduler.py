@@ -30,15 +30,24 @@ class Scheduler(object):
 
 
 schedulers = [
-    Scheduler(dev=floor_heatings.cabinet_fh, temp=(20, 20, 20, 20),
-              off={
-                  "mon": (1, ),
-                  "tue": (1, ),
-                  "wed": (1, ),
-                  "thu": (1, ),
-                  "fri": (1, ),
-                  "sat": (1, ),
-                  "sun": (1, ),
+    Scheduler(dev=floor_heatings.cabinet_fh, temp=(23, 23, 20, 20),
+              athome={
+                  "mon": (6, 18),
+                  "tue": (6, 18),
+                  "wed": (6, 18),
+                  "thu": (6, 18),
+                  "fri": (6, 18),
+                  "sat": (8,),
+                  "sun": (8,),
+                  }, 
+              away={
+                  "mon": (0, 9),
+                  "tue": (0, 9),
+                  "wed": (0, 9),
+                  "thu": (0, 9),
+                  "fri": (0, 9),
+                  "sat": (0,),
+                  "sun": (0,),
                   }),
     Scheduler(dev=floor_heatings.cabinet_rad, temp=(6, 6, 6, 6),
               off={
@@ -136,7 +145,7 @@ schedulers = [
                   "sat": (0,),
                   "sun": (0,),
                   }),
-    Scheduler(dev=floor_heatings.bad_room_rad, temp=(22, 22, 22, 22),
+    Scheduler(dev=floor_heatings.bad_room_rad, temp=(23, 23, 23, 23),
               athome={
                   "mon": (6, 18),
                   "tue": (6, 18),
@@ -193,7 +202,7 @@ schedulers = [
                   "sat": (0,),
                   "sun": (0,),
                   }),
-    Scheduler(dev=floor_heatings.bath_room_fh, temp=(26, 26, 20, 20),
+    Scheduler(dev=floor_heatings.bath_room_fh, temp=(23, 23, 20, 20),
               athome={
                   "mon": (6, 18),
                   "tue": (6, 18),
@@ -212,7 +221,7 @@ schedulers = [
                   "sat": (0,),
                   "sun": (0,),
                   }),
-    Scheduler(dev=floor_heatings.bath_room_rad, temp=(24, 24, 20, 20),
+    Scheduler(dev=floor_heatings.bath_room_rad, temp=(6, 6, 6, 6),
               athome={
                   "mon": (6, 18),
                   "tue": (6, 18),
